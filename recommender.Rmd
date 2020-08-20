@@ -1,0 +1,260 @@
+---
+title: "Recommendation"
+author: "Merint"
+date: "11/4/2019"
+output: html_document
+---
+
+```{r}
+library("recommenderlab")
+library("ggplot2")
+library(tidyverse)
+library(cartography)
+library(MASS)
+library(ISLR)
+library(rgdal)
+library(dbplyr)
+library(arules)
+library(stringr)
+```
+```{r}
+data(MovieLense)
+class(MovieLense)
+
+```
+
+```{r}
+dim(MovieLense)
+slotNames(MovieLense)
+```
+
+```{r}
+Data<- MovieLense@data
+```
+
+```{r}
+ratings <- as.vector(Data)
+unique(ratings)
+```
+
+```{r}
+table_ratings <- table(ratings)
+table_ratings
+```
+
+```{r}
+ratings <- ratings[ratings != 0]
+table(ratings)
+```
+
+```{r}
+plot1<- qplot(ratings) + ggtitle("Number of Ratings")
+plot1 + stat_bin(binwidth = 0.5, drop = FALSE, right = FALSE, col = "blue")
+```
+
+
+
+```{r}
+avg_ratings <- colMeans(MovieLense)
+qplot(avg_ratings) + stat_bin(binwidth = 0.5) +
+ggtitle("Distribution of the average movie rating")
+```
+
+As we see, there are only a few count on ratings 1 and 5. This is coz very few people have rated these movies. We can put a threshold value of 100 here.
+
+```{r}
+avg_ratings_threshold <- avg_ratings[colCounts(MovieLense) > 100]
+
+qplot(avg_ratings_threshold) + stat_bin(binwidth = 0.1) +
+ggtitle("Distribution of average ratings with Threshold of 100")
+```
+
+Selecting only most relevant data. i.e users who have rated more than 50 movies and movies that have atleast 70 ratings
+
+```{r}
+Data_rel <- MovieLense[rowCounts(MovieLense)>50, colCounts(Data_rel)>70]
+Data_rel
+```
+
+We now look at the rating distribution per user wise
+```{r}
+Avg_user_rat<- rowMeans(Data_rel)
+qplot(Avg_user_rat, xlab="Average Ratings", ylab="Count") + stat_bin(binwidth = 0.1) +
+ggtitle("Distribution of the average rating per user") 
+```
+
+
+Building recommender model using recommenderlab
+
+
+Setiing a threshold value for good ratings
+```{r}
+thresh_ratings<- 3
+```
+
+Splitting the data
+```{r}
+split_sets<- evaluationScheme(data = Data_rel, method = "split", train = 0.75, given = 15, goodRating = thresh_ratings, k = 1)
+
+split_sets
+```
+
+```{r}
+Known <- getData(split_sets, "known")
+Known
+```
+````{r}
+Unknown<- getData(split_sets, "unknown")
+Unknown
+```
+
+```{r}
+Train <- getData(split_sets, "train")
+Train
+```
+
+
+Training the recommender model for Item based Collaborative filtering
+```{r}
+recommender_model <- Recommender(data = Train, method = "IBCF", parameter = NULL)
+```
+
+```{r}
+model_pred <- predict(object = recommender_model, newdata = Known, n = 10, type = "topNList")
+```
+
+```{r}
+slotNames(model_pred)
+```
+
+```{r}
+user1 <- model_pred@items[[5]]
+pred_user1 <- model_pred@itemLabels[user1]
+pred_user1
+```
+
+
+```{r}
+model_accuracy<- calcPredictionAccuracy(x = model_pred, data = Unknown)
+model_accuracy
+```
+
+Using Cross validation to find accuracy based on Users
+
+```{r}
+split_sets_CV<- evaluationScheme(data = Data_rel, method = "cross-validation", given = 15, goodRating = thresh_ratings, k = 5)
+Known_CV <- getData(split_sets_CV, "known")
+Unknown_CV <- getData(split_sets_CV, "unknown")
+Train_CV <- getData(split_sets_CV, "train")
+```
+```{r}
+Unknown_CV
+```
+ Item Based Collaborative filtering on CV sets
+```{r}
+recommender_model_IBCF_CV <- Recommender(data = Train_CV, method = "IBCF", parameter = NULL)
+model_pred_IBCF_CV <- predict(object = recommender_model_IBCF_CV, newdata = Known_CV, n = 10, type = "ratings")
+```
+
+```{r}
+model_accuracy_IBCF_CV<- calcPredictionAccuracy(x = model_pred_IBCF_CV, data = Unknown_CV, byUser=TRUE)
+model_accuracy_IBCF_CV
+```
+
+```{r}
+IBCF_Accuracy<- data.frame(model_accuracy_IBCF_CV)
+hist(IBCF_Accuracy$RMSE, breaks=12, col="red", xlab="RMSE range", ylab="Count")
+```
+
+
+Now we follow the same for User based Collaborative filtering and also by varying the models wit different distance calculations. i.e Cosine, Pearson, and Euclidean.
+
+Let's start IBCF with Pearsons
+```{r}
+recommender_model_IBCF_Pear <- Recommender(data = Train, method = "IBCF", param = list(method ="pearson"))
+model_pred_IBCF_Pear <- predict(object = recommender_model_IBCF_Pear, newdata = Known, n = 10, type = "ratings")
+model_accuracy_IBCF_Pear<- calcPredictionAccuracy(x = model_pred_IBCF_Pear, data = Unknown)
+model_accuracy_IBCF_Pear
+```
+
+Next IBCF with Euclidean
+```{r}
+recommender_model_IBCF_Euc <- Recommender(data = Train, method = "IBCF", param = list(method ="Euclidean"))
+model_pred_IBCF_Euc <- predict(object = recommender_model_IBCF_Euc, newdata = Known, n = 10, type = "ratings")
+model_accuracy_IBCF_Euc<- calcPredictionAccuracy(x = model_pred_IBCF_Euc, data = Unknown)
+model_accuracy_IBCF_Euc
+```
+
+Now we will calculater the UBCF with Cosine
+```{r}
+recommender_model_UBCF_Cos <- Recommender(data = Train, method = "UBCF", param = list(method ="cosine"))
+model_pred_UBCF_Cos <- predict(object = recommender_model_UBCF_Cos, newdata = Known, n = 10, type = "ratings")
+model_accuracy_UBCF_Cos<- calcPredictionAccuracy(x = model_pred_UBCF_Cos, data = Unknown)
+model_accuracy_UBCF_Cos
+```
+
+Next UBCF with Pearsons
+```{r}
+recommender_model_UBCF_Pear <- Recommender(data = Train, method = "UBCF", param = list(method ="pearson"))
+model_pred_UBCF_Pear <- predict(object = recommender_model_UBCF_Pear, newdata = Known, n = 10, type = "ratings")
+model_accuracy_UBCF_Pear<- calcPredictionAccuracy(x = model_pred_UBCF_Pear, data = Unknown)
+model_accuracy_UBCF_Pear
+```
+
+Now UBCF with Euclidean
+```{r}
+recommender_model_UBCF_Euc <- Recommender(data = Train, method = "UBCF", param = list(method ="Euclidean"))
+model_pred_UBCF_Euc <- predict(object = recommender_model_UBCF_Euc, newdata = Known, n = 10, type = "ratings")
+model_accuracy_UBCF_Euc<- calcPredictionAccuracy(x = model_pred_UBCF_Euc, data = Unknown)
+model_accuracy_UBCF_Euc
+```
+
+```{r}
+MSE<- c(model_accuracy[2],model_accuracy_IBCF_Euc[2], model_accuracy_IBCF_Pear[2],model_accuracy_UBCF_Cos[2],model_accuracy_UBCF_Euc[2],model_accuracy_UBCF_Pear[2])
+```
+
+```{r}
+Models<- c("IBCF_C","IBCF_E","IBCF_P","UBCF_C","UBCF_E","UBCF_P")
+```
+
+```{r}
+b<-barplot(MSE,names.arg=Models,xlab="Model types",ylab="MSE",col="yellow",
+main="Recommender Model Comparison",border="red")
+text(b, 0, round(MSE, 3),cex=1,pos=3)
+```
+
+
+Applying Apriori Algorithm
+
+To begin with, we will binarize the data by keepting threshold rating as 3
+
+```{r}
+Data_bin <- binarize(MovieLense, minRating= thresh_ratings)
+class(Data_bin)
+```
+
+Converting BinaryRatingMatrix to matrix
+```{r}
+Data_bin_matrix<- as(Data_bin,"matrix")
+view(Data_bin_matrix)
+```
+
+Converting the TRUE and FALSE to 1s and 0s
+```{r}
+Data_bin_new<- 1*Data_bin_matrix
+View(Data_bin_new)
+```
+
+Applying Apriori Algorithm
+```{r}
+rules <- apriori(data = Data_bin_new, parameter = list(supp =0.2, conf = 0.9))
+```
+
+
+
+```{r}
+rules_df<- as(rules, "data.frame")
+rules_df<-rules_df[order(-rules_df$lift, -rules_df$confidence), ]
+```
+
+
